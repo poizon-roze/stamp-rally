@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Stamp Rally</title>
+<style>
+:root{--bg:#f6f1e7;--card:#fffdf8;--ink:#2b2622;--mut:#8a7f72;--acc:#c2410c;--ok:#15803d;--line:#e4dccd;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#1a1714;--card:#25201b;--ink:#f1e9dc;--mut:#a09585;--acc:#fb923c;--ok:#4ade80;--line:#3a332b}}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#1a1714;--card:#25201b;--ink:#f1e9dc;--mut:#a09585;--acc:#fb923c;--ok:#4ade80;--line:#3a332b}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,system-ui,"Helvetica Neue",sans-serif;padding:14px 14px 90px;max-width:560px;margin:auto}
+h1{font:700 26px Georgia,serif;margin:4px 0 2px}h2{font:700 18px Georgia,serif;margin:18px 0 8px}
+.sub{color:var(--mut);font-size:13px;margin:0 0 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin:10px 0}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+button,.btn{font:600 15px inherit;font-family:inherit;border:0;border-radius:10px;padding:10px 14px;background:var(--acc);color:#fff;min-height:44px;cursor:pointer}
+button.alt,.btn.alt{background:transparent;color:var(--acc);border:1px solid var(--acc)}
+button:disabled{opacity:.5}
+input,select,textarea{width:100%;box-sizing:border-box;font:16px inherit;font-family:inherit;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);margin:4px 0}
+.pill{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid var(--line);color:var(--mut)}
+.ok{color:var(--ok)}.bad{color:var(--acc)}
+.stampbox{width:84px;height:84px;flex:none}
+.photo{width:100%;border-radius:10px;margin-top:8px;display:block}
+nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+nav button{flex:1;background:none;color:var(--mut);border-radius:0;font-size:13px;min-height:54px}
+nav button.on{color:var(--acc)}
+.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.slot{aspect-ratio:1;border:2px dashed var(--line);border-radius:10px;display:flex;align-items:center;justify-content:center;position:relative;font-size:20px;color:var(--mut)}
+.slot.on{border:2px solid var(--line);background:var(--bg)}
+.slot .stampbox{width:92%;height:92%}
+.slot small{position:absolute;top:1px;left:4px;font-size:10px;color:var(--mut)}
+.msg{padding:10px;border-radius:10px;background:var(--card);border:1px dashed var(--acc);margin:8px 0;font-size:14px}
+</style></head><body>
+<div id="app"></div>
+<nav id="nav"></nav>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let db=null,spots=[],visits=[],pos=null,tab='rally',msg='',adding=false,askpos=false,gpsOnly=false,meta={};
+const open=()=>new Promise((res,rej)=>{const r=indexedDB.open('stamprally',1);r.onupgradeneeded=()=>['spots','visits'].forEach(n=>r.result.createObjectStore(n,{keyPath:'id'}));r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+const tx=(s,m,f)=>new Promise((res,rej)=>{const t=db.transaction(s,m),o=f(t.objectStore(s));t.oncomplete=()=>res(o&&o.result);t.onerror=()=>rej(t.error)});
+const put=async(s,v)=>{if(db)try{await tx(s,'readwrite',o=>o.put(v))}catch(e){msg='Save failed: '+e.message}};
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const RAD=300,MS=[[3,'☕','One coffee'],[5,'☕🥐','One coffee + one Ginza bakery item'],[10,'🍫','One premium chocolate']];
+const mk=t=>{const d=new Date(t);return d.getFullYear()+'-'+(d.getMonth()+1)},dayKey=t=>mk(t)+'-'+new Date(t).getDate();
+function cards(){const c=[];for(const v of [...visits].sort((a,b)=>a.t-b.t)){let k=c[c.length-1];if(!k||k.m!==mk(v.t)||k.v.length>=10){k={m:mk(v.t),v:[]};c.push(k)}k.v.push(v)}return c}
+function curCard(){const all=cards(),l=all[all.length-1],fresh=!(l&&l.m===mk(Date.now())&&l.v.length<10);return{all,k:fresh?{m:mk(Date.now()),v:[]}:l,n:fresh?all.length+1:all.length}}
+function gridHTML(){const {k,n}=curCard(),nx=MS.find(x=>x[0]>k.v.length);let g='';
+ for(let i=0;i<10;i++){const v=k.v[i],m=MS.find(x=>x[0]===i+1);g+=v?`<div class="slot on" title="${esc(v.name)}">${stamp(v.name,v.t,v.id)}<small>${i+1}</small></div>`:`<div class="slot"><span>${m?m[1]:''}</span><small>${i+1}</small></div>`}
+ return `<div class="card"><div class="row"><b>Card ${n} · ${new Date().toLocaleString([], {month:'long',year:'numeric'})}</b><span class="pill">${k.v.length}/10</span></div><div class="grid" style="margin-top:8px">${g}</div><p class="sub" style="margin:8px 0 0">${nx?`${nx[0]-k.v.length} more for ${nx[1]} ${nx[2]}`:'Card complete!'}<br>1 stamp per spot per day (resets 00:00) · card resets at 10 stamps or month end · lifetime ${visits.length} stamps</p></div>`}
+function rewardsHTML(){const {all}=curCard(),last=all[all.length-1];let r='';
+ all.forEach(k=>MS.forEach(m=>{if(k.v.length<m[0])return;const tv=k.v[m[0]-1],red=tv.redeemed&&tv.redeemed[m[0]];if(red&&k!==last)return;r+=`<div class="row" style="margin:6px 0"><span>${m[1]} ${m[2]}<br><small class="sub">earned ${when(tv.t)}</small></span><button class="${red?'alt':''}" data-act="redeem" data-id="${tv.id}" data-m="${m[0]}">${red?'Redeemed ✓':'Mark redeemed'}</button></div>`}));
+ return r?`<div class="card"><b>🎁 Rewards</b>${r}</div>`:''}
+function mapHTML(){const pts=spots.map(s=>({...s,n:visits.filter(v=>v.spotId===s.id).length}));
+ let h='<h1>Map</h1><p class="sub">Offline sketch map, north is up. Tap a spot to open Apple Maps.</p>';
+ if(!pts.length&&!pos)return h+'<div class="card sub">Add a spot or enable GPS to see points here.</div>';
+ const all=[...pts.map(p=>[p.lat,p.lng]),...(pos?[[pos.latitude,pos.longitude]]:[])],la=all.map(a=>a[0]),lo=all.map(a=>a[1]),la0=Math.min(...la),la1=Math.max(...la),lo0=Math.min(...lo),lo1=Math.max(...lo),mid=(la0+la1)/2,kx=Math.cos(mid*Math.PI/180),W=320,H=320,P=40,sc=(W-2*P)/Math.max((lo1-lo0)*kx,la1-la0,.002),X=l=>W/2+(l-(lo0+lo1)/2)*kx*sc,Y=l=>H/2-(l-mid)*sc,rp=Math.max(6,300/111320*sc);
+ let s='';
+ for(const p of pts)s+=`<a href="https://maps.apple.com/?ll=${p.lat},${p.lng}&amp;q=${encodeURIComponent(p.name)}" target="_blank" rel="noopener"><circle cx="${X(p.lng)}" cy="${Y(p.lat)}" r="${rp}" fill="none" stroke="${p.n?'var(--ok)':'var(--mut)'}" stroke-dasharray="3 3"/><circle cx="${X(p.lng)}" cy="${Y(p.lat)}" r="5" style="fill:${p.n?'var(--ok)':'var(--bg)'};stroke:${p.n?'var(--ok)':'var(--acc)'};stroke-width:2"/><text x="${X(p.lng)}" y="${Y(p.lat)+rp+12}" text-anchor="middle" font-size="11" style="fill:var(--ink)">${esc(p.name.slice(0,14))}</text></a>`;
+ if(pos)s+=`<circle cx="${X(pos.longitude)}" cy="${Y(pos.latitude)}" r="6" fill="#2563eb" stroke="#fff" stroke-width="2"/><text x="${X(pos.longitude)}" y="${Y(pos.latitude)-10}" text-anchor="middle" font-size="11" fill="#2563eb">You</text>`;
+ return h+`<div class="card"><svg viewBox="0 0 ${W} ${H}" style="width:100%;background:var(--bg);border-radius:10px">${s}</svg><p class="sub" style="margin:8px 0 0">Green = stamped · hollow = not yet · dashed ring = 300 m stamp zone · blue = you</p></div>`}
+function monthHTML(){if(!visits.length)return '';const by={},cs=cards();for(const v of visits)(by[mk(v.t)]=by[mk(v.t)]||[]).push(v);
+ const top=k=>Math.max(...by[k].map(v=>v.t));
+ let r='';for(const k of Object.keys(by).sort((a,b)=>top(b)-top(a))){const L=by[k],lab=new Date(L[0].t).toLocaleString([], {month:'long',year:'numeric'}),pl=new Set(L.map(v=>v.spotId)).size,dy=new Set(L.map(v=>dayKey(v.t))).size,cd=cs.filter(c=>c.m===k&&c.v.length>=10).length,rw=cs.filter(c=>c.m===k).reduce((s,c)=>s+MS.filter(m=>c.v.length>=m[0]).length,0);
+  r+=`<div style="margin-top:8px"><b>${lab}</b><div class="sub" style="margin:0">${L.length} stamps · ${pl} places · ${dy} days · ${cd} cards done · ${rw} rewards</div></div>`}
+ return `<div class="card"><b>📊 Monthly summary</b>${r}</div>`}
+function popup(h){const o=document.createElement('div');o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:99;padding:20px';o.innerHTML=`<div class="card" style="max-width:340px;width:100%;text-align:center">${h}<button data-ok style="margin-top:8px;width:100%">Nice!</button></div>`;o.querySelector('[data-ok]').onclick=()=>o.remove();o.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{tab=b.dataset.go;o.remove();view()});document.body.appendChild(o)}
+function stampPopup(v){const k=cards().find(c=>c.v.includes(v)),n=k.v.length,m=MS.find(x=>x[0]===n);
+ return `<div class="sub">New stamp collected!</div>${stamp(v.name,v.t,v.id)}<h2 style="margin:4px 0">${esc(v.name)}</h2><p style="margin:0">Stamp ${n} of 10 on this card</p>${m?`<div style="font-size:42px;margin-top:8px">${m[1]}</div><b>Reward unlocked: ${m[2]}</b><p class="sub">Find it under 🎁 Rewards on the Rally tab.</p>`:''}${n===10?'<p><b>Card complete!</b> A fresh card starts with your next stamp.</p>':''}<button class="alt" data-go="journal" style="margin-top:10px;width:100%">📷 Add sketch in Journal</button>`}
+const dist=(a,b,c,d)=>{const R=6371000,r=x=>x*Math.PI/180,h=Math.sin(r(c-a)/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(r(d-b)/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
+const fmt=m=>m<1000?Math.round(m)+' m':(m/1000).toFixed(1)+' km';
+const when=t=>new Date(t).toLocaleString([], {dateStyle:'medium',timeStyle:'short'});
+const getPos=()=>new Promise((res,rej)=>navigator.geolocation?navigator.geolocation.getCurrentPosition(p=>res(p.coords),e=>rej(e),{enableHighAccuracy:true,timeout:20000,maximumAge:0}):rej({message:'Geolocation not supported'}));
+function stamp(name,t,id){let h=0;for(const c of id)h=(h*31+c.charCodeAt(0))>>>0;const col=['#b91c1c','#1d4ed8','#047857','#7e22ce','#b45309'][h%5],rot=(h%24)-12,d=new Date(t);
+return `<svg class="stampbox" viewBox="0 0 100 100" style="transform:rotate(${rot}deg)"><circle cx="50" cy="50" r="46" fill="none" stroke="${col}" stroke-width="3"/><circle cx="50" cy="50" r="40" fill="none" stroke="${col}" stroke-width="1"/><text x="50" y="44" text-anchor="middle" font-size="11" font-weight="700" fill="${col}" font-family="Georgia,serif">${esc(name.slice(0,14))}</text><text x="50" y="58" text-anchor="middle" font-size="9" fill="${col}">${d.toLocaleDateString([], {month:'short',day:'numeric'}).toUpperCase()}</text><text x="50" y="70" text-anchor="middle" font-size="8" fill="${col}">${d.getFullYear()} ✓</text></svg>`}
+const shrink=f=>new Promise((res,rej)=>{const i=new Image,u=URL.createObjectURL(f);i.onload=()=>{const k=Math.min(1,1280/Math.max(i.width,i.height)),c=document.createElement('canvas');c.width=i.width*k;c.height=i.height*k;c.getContext('2d').drawImage(i,0,0,c.width,c.height);URL.revokeObjectURL(u);res(c.toDataURL('image/jpeg',.72))};i.onerror=()=>rej(new Error('Image failed'));i.src=u});
+
+function view(){
+ $('#nav').innerHTML=[['rally','📍 Rally'],['map','🗺️ Map'],['journal','📖 Journal'],['backup','💾 Backup']].map(([k,l])=>`<button class="${tab===k?'on':''}" data-tab="${k}">${l}</button>`).join('');
+ let h=(msg?`<div class="msg">${esc(msg)}</div>`:'');
+ if(tab==='rally'){
+  const list=spots.map(s=>({...s,d:pos?dist(pos.latitude,pos.longitude,s.lat,s.lng):null})).sort((a,b)=>(a.d??1e12)-(b.d??1e12));
+  h+=`<h1>Stamp Rally</h1><p class="sub">${pos?(pos.manual?'Manual position':`GPS ±${Math.round(pos.accuracy)} m`):'GPS not active'} · ${new Set(visits.map(v=>v.spotId)).size}/${spots.length} stamped</p>
+  <div class="row"><button data-act="gps">${pos?'Refresh GPS':'Enable GPS'}</button><button class="alt" data-act="addtoggle">${adding?'Cancel':'+ Add spot'}</button>${gpsOnly?'':`<button class="alt" data-act="postoggle">${askpos?'Close':'Set position manually'}</button>`}</div>`;
+  if(askpos&&!gpsOnly)h+=`<div class="card"><b>Set my position</b><p class="sub">In Apple Maps, long-press the spot, swipe up, and copy the coordinates. Paste them here.</p><input id="p-ll" placeholder="35.6586, 139.7454" inputmode="decimal"><button data-act="setpos">Use this position</button></div>`;
+  if(adding)h+=`<div class="card"><b>New spot</b><input id="n-name" placeholder="Name (e.g. Senso-ji)"><div class="row"><input id="n-lat" placeholder="Latitude" inputmode="decimal" value="${pos?pos.latitude.toFixed(6):''}" style="flex:1"><input id="n-lng" placeholder="Longitude" inputmode="decimal" value="${pos?pos.longitude.toFixed(6):''}" style="flex:1"></div><p class="sub">Stamp radius: 300 m</p><p class="sub">Tip: enable GPS first to fill in where you stand now.</p><button data-act="savespot">Save spot</button></div>`;
+  h+=gridHTML()+rewardsHTML();
+  if(!spots.length)h+=`<div class="card sub">No spots yet. Stand where you want a stamp, tap Enable GPS, then Add spot.</div>`;
+  for(const s of list){const n=visits.filter(v=>v.spotId===s.id).length,td=visits.some(v=>v.spotId===s.id&&dayKey(v.t)===dayKey(Date.now())),near=s.d!=null&&s.d<=RAD;
+   h+=`<div class="card"><div class="row"><div><b>${esc(s.name)}</b><div class="sub" style="margin:0">${s.d==null?'distance unknown':fmt(s.d)+' away'} · radius ${RAD} m</div></div><span class="pill ${n?'ok':''}">${td?'✓ stamped today':n?n+'× stamped':near?'in range':'not yet'}</span></div><div class="row" style="margin-top:8px"><button data-act="checkin" data-id="${s.id}" ${td?'disabled':''}>${td?'Stamped today ✓':'Verify &amp; stamp'}</button></div></div>`}
+ }
+ if(tab==='map')h+=mapHTML();
+ if(tab==='journal'){
+  h+=`<h1>Travel Journal</h1><p class="sub">${visits.length} entries · kept on this device, back them up in Backup</p>`;
+  h+=monthHTML();
+  if(!visits.length)h+=`<div class="card sub">Stamp a spot and your entry will appear here.</div>`;
+  for(const v of [...visits].sort((a,b)=>b.t-a.t)){const s=spots.find(x=>x.id===v.spotId);
+   h+=`<div class="card"><div class="row" style="flex-wrap:nowrap">${stamp(v.name||s?.name||'?',v.t,v.id)}<div style="flex:1"><b>${esc(v.name)}</b><div class="sub" style="margin:0">${when(v.t)}<br>${v.lat.toFixed(5)}, ${v.lng.toFixed(5)} · ${v.manual?'manual position':'±'+Math.round(v.acc)+' m'} · ${fmt(v.d)} from marker</div></div></div>
+   ${v.photo?`<img class="photo" src="${v.photo}" alt="Sketch">`:''}
+   <label class="btn alt" style="display:block;text-align:center;margin-top:8px">${v.photo?'Replace sketch photo':'📷 Photograph sketch'}<input type="file" accept="image/*" capture="environment" hidden data-photo="${v.id}"></label>
+   <textarea rows="3" placeholder="Notes about this place…" data-note="${v.id}">${esc(v.note||'')}</textarea></div>`}
+ }
+ if(tab==='backup'){
+  const mb=(JSON.stringify(visits).length/1048576).toFixed(1);
+  h+=`<h1>Backup</h1><p class="sub">${spots.length} spots · ${visits.length} journal entries · about ${mb} MB<br>Last backup: ${meta.last?when(meta.last):'never'}</p>
+  <div class="card"><b>Save backup file</b><p class="sub">One .json file with every spot, stamp, note and sketch photo. Save it to Files or iCloud Drive.</p><button data-act="export">Save backup file</button></div>
+  <div class="card"><b>Copy backup as text</b><p class="sub">Fallback if saving a file is unavailable. Paste into Notes.</p><button class="alt" data-act="copy">Copy to clipboard</button></div>
+  <div class="card"><b>Restore</b><p class="sub">Merges a backup file into this device. Nothing is overwritten or deleted.</p><input type="file" accept=".json,application/json" data-restore="1"></div>
+  <div class="card"><label class="row" style="flex-wrap:nowrap"><span><b>GPS only</b><br><small class="sub">Turns off manual position, so every stamp needs real GPS.</small></span><input type="checkbox" data-gps ${gpsOnly?'checked':''} style="width:auto"></label></div>
+  <p class="sub">Browser storage can be cleared by iOS if the page goes unused for weeks. Back up after each trip.</p>`;
+ }
+ $('#app').innerHTML=h;
+}
+const backup=()=>JSON.stringify({app:'stamp-rally',v:1,exported:Date.now(),spots,visits});
+async function mark(){meta.last=Date.now();try{localStorage.setItem('sr-last',meta.last)}catch(e){}}
+document.addEventListener('click',async e=>{
+ const t=e.target.closest('button');if(!t)return;
+ if(t.dataset.tab){tab=t.dataset.tab;msg='';return view()}
+ const a=t.dataset.act;if(!a)return;msg='';
+ try{
+ if(a==='gps'){msg='Locating…';view();pos=await getPos();msg=''}
+ if(a==='addtoggle')adding=!adding;
+ if(a==='postoggle')askpos=!askpos;
+ if(a==='redeem'){const v=visits.find(x=>x.id===t.dataset.id);v.redeemed=v.redeemed||{};v.redeemed[t.dataset.m]=!v.redeemed[t.dataset.m];await put('visits',v)}
+ if(a==='setpos'){const m=($('#p-ll').value.match(/-?\d+(\.\d+)?/g)||[]).map(Number);
+  if(m.length<2||Math.abs(m[0])>90||Math.abs(m[1])>180)msg='Paste coordinates like 35.6586, 139.7454';
+  else{pos={latitude:m[0],longitude:m[1],accuracy:0,manual:true};askpos=false;msg='Position set manually. Tap Verify & stamp at a spot.'}}
+ if(a==='savespot'){const name=$('#n-name').value.trim(),lat=parseFloat($('#n-lat').value),lng=parseFloat($('#n-lng').value);
+  if(!name||isNaN(lat)||isNaN(lng)||Math.abs(lat)>90||Math.abs(lng)>180)msg='Enter a name and valid coordinates.';
+  else{const s={id:uid(),name,lat,lng,radius:300};spots.push(s);await put('spots',s);adding=false}}
+ if(a==='checkin'){const s=spots.find(x=>x.id===t.dataset.id);if(!(pos&&pos.manual&&!gpsOnly)){msg='Checking your GPS…';view();pos=await getPos()}
+  const d=dist(pos.latitude,pos.longitude,s.lat,s.lng);
+  if(!pos.manual&&pos.accuracy>100)msg=`GPS too fuzzy (±${Math.round(pos.accuracy)} m). Step outside and try again.`;
+  else if(visits.some(x=>x.spotId===s.id&&dayKey(x.t)===dayKey(Date.now())))msg=`You already stamped ${s.name} today. Come back after midnight.`;
+  else if(d>RAD)msg=`Not there yet: you are ${fmt(d)} from ${s.name} (need within ${RAD} m).`;
+  else{const v={id:uid(),spotId:s.id,name:s.name,t:Date.now(),lat:pos.latitude,lng:pos.longitude,acc:pos.accuracy,manual:!!pos.manual,d,note:'',photo:''};visits.push(v);await put('visits',v);popup(stampPopup(v));msg=''}}
+ if(a==='export'){const dl=window.claude?await claude.use('downloads'):null;const name=`stamp-rally-${new Date().toISOString().slice(0,10)}.json`;
+  if(!dl){const u=URL.createObjectURL(new Blob([backup()],{type:'application/json'})),l=document.createElement('a');l.href=u;l.download=name;l.click();await mark();msg='Backup downloaded.'}else{await dl.save({filename:name,data:backup()});await mark();msg='Backup saved.'}}
+ if(a==='copy'){await navigator.clipboard.writeText(backup());await mark();msg='Backup copied. Paste it into Notes.'}
+ }catch(err){const g=err&&(err.code===1||err.code===2||err.code===3||/Geoloc/.test(err.message||''));if(g)askpos=true;
+  msg=err.code==='declined'?'Save cancelled.':(g?(gpsOnly?'GPS is blocked or unavailable. Turn off GPS only in the Backup tab to use manual position.':'GPS is blocked or unavailable in this page. Set your position manually below.'):err.message||'Something went wrong.')}
+ view()});
+document.addEventListener('change',async e=>{
+ const t=e.target;
+ try{
+ if(t.dataset.photo&&t.files[0]){const v=visits.find(x=>x.id===t.dataset.photo);v.photo=await shrink(t.files[0]);await put('visits',v);msg='Sketch saved.';view()}
+ if(t.dataset.gps!==undefined){gpsOnly=t.checked;try{localStorage.setItem('sr-gps',gpsOnly?'1':'0')}catch(e){}if(gpsOnly&&pos&&pos.manual)pos=null;view()}
+ if(t.dataset.note){const v=visits.find(x=>x.id===t.dataset.note);v.note=t.value;await put('visits',v)}
+ if(t.dataset.restore&&t.files[0]){const j=JSON.parse(await t.files[0].text());if(j.app!=='stamp-rally')throw new Error('Not a Stamp Rally backup.');
+  let n=0;for(const s of j.spots||[])if(!spots.some(x=>x.id===s.id)){spots.push(s);await put('spots',s)}
+  for(const v of j.visits||[])if(!visits.some(x=>x.id===v.id)){visits.push(v);await put('visits',v);n++}
+  msg=`Restored ${n} new entries.`;view()}
+ }catch(err){msg=err.message;view()}});
+(async()=>{
+ try{db=await open();spots=await tx('spots','readonly',o=>o.getAll());visits=await tx('visits','readonly',o=>o.getAll());
+  if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}
+ catch(e){msg='Storage unavailable: entries will vanish when you close this page. Back up often.'}
+ try{meta.last=+localStorage.getItem('sr-last')||0}catch(e){}
+ try{gpsOnly=localStorage.getItem('sr-gps')==='1'}catch(e){}
+ view();
+})();
+</script></body></html>
