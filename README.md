@@ -1,6 +1,7 @@
 # stamp-rally
 # Stamp Rally 📍
 
+Created by Claude from the brainstorming of several peeps.
 A personal GPS-based stamp rally web app for exploring places, collecting digital stamps, and keeping a small travel journal.
 
 I made this for my walks and day trips. Instead of just visiting places, I wanted a simple way to record where I've been, collect stamps, and make exploring a little more fun.
