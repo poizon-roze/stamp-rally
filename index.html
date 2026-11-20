@@ -35,7 +35,7 @@ nav button.on{color:var(--acc)}
 <script>
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-let db=null,spots=[],visits=[],pos=null,tab='rally',msg='',adding=false,askpos=false,gpsOnly=false,meta={};
+let db=null,spots=[],visits=[],pos=null,tab='rally',msg='',adding=false,askpos=false,gpsOnly=false,help=null,meta={};
 const open=()=>new Promise((res,rej)=>{const r=indexedDB.open('stamprally',1);r.onupgradeneeded=()=>['spots','visits'].forEach(n=>r.result.createObjectStore(n,{keyPath:'id'}));r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
 const tx=(s,m,f)=>new Promise((res,rej)=>{const t=db.transaction(s,m),o=f(t.objectStore(s));t.oncomplete=()=>res(o&&o.result);t.onerror=()=>rej(t.error)});
 const put=async(s,v)=>{if(db)try{await tx(s,'readwrite',o=>o.put(v))}catch(e){msg='Save failed: '+e.message}};
@@ -63,6 +63,8 @@ function monthHTML(){if(!visits.length)return '';const by={},cs=cards();for(cons
  let r='';for(const k of Object.keys(by).sort((a,b)=>top(b)-top(a))){const L=by[k],lab=new Date(L[0].t).toLocaleString([], {month:'long',year:'numeric'}),pl=new Set(L.map(v=>v.spotId)).size,dy=new Set(L.map(v=>dayKey(v.t))).size,cd=cs.filter(c=>c.m===k&&c.v.length>=10).length,rw=cs.filter(c=>c.m===k).reduce((s,c)=>s+MS.filter(m=>c.v.length>=m[0]).length,0);
   r+=`<div style="margin-top:8px"><b>${lab}</b><div class="sub" style="margin:0">${L.length} stamps · ${pl} places · ${dy} days · ${cd} cards done · ${rw} rewards</div></div>`}
  return `<div class="card"><b>📊 Monthly summary</b>${r}</div>`}
+function helpHTML(s){const r=(l,x)=>`<div class="row" style="margin-top:6px;flex-wrap:nowrap"><span style="min-width:0;word-break:break-word"><small class="sub">${l}</small><br>${esc(x)}</span><button class="alt" data-act="cp" data-txt="${esc(x)}">Copy</button></div>`;
+ return `<div style="margin-top:8px;border-top:1px dashed var(--line);padding-top:6px"><small class="sub">Shortcuts › Automation › Arrive. Search the place or drop a pin at these coordinates, then add Show Notification and Open URLs.</small>${r('Notification text',`You're near ${s.name}! Open Stamp Rally to stamp.`)}${r('Coordinates',s.lat+', '+s.lng)}${r('App link',location.href.split('#')[0])}</div>`}
 function popup(h){const o=document.createElement('div');o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:99;padding:20px';o.innerHTML=`<div class="card" style="max-width:340px;width:100%;text-align:center">${h}<button data-ok style="margin-top:8px;width:100%">Nice!</button></div>`;o.querySelector('[data-ok]').onclick=()=>o.remove();o.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{tab=b.dataset.go;o.remove();view()});document.body.appendChild(o)}
 function stampPopup(v){const k=cards().find(c=>c.v.includes(v)),n=k.v.length,m=MS.find(x=>x[0]===n);
  return `<div class="sub">New stamp collected!</div>${stamp(v.name,v.t,v.id)}<h2 style="margin:4px 0">${esc(v.name)}</h2><p style="margin:0">Stamp ${n} of 10 on this card</p>${m?`<div style="font-size:42px;margin-top:8px">${m[1]}</div><b>Reward unlocked: ${m[2]}</b><p class="sub">Find it under 🎁 Rewards on the Rally tab.</p>`:''}${n===10?'<p><b>Card complete!</b> A fresh card starts with your next stamp.</p>':''}<button class="alt" data-go="journal" style="margin-top:10px;width:100%">📷 Add sketch in Journal</button>`}
@@ -86,7 +88,7 @@ function view(){
   h+=gridHTML()+rewardsHTML();
   if(!spots.length)h+=`<div class="card sub">No spots yet. Stand where you want a stamp, tap Enable GPS, then Add spot.</div>`;
   for(const s of list){const n=visits.filter(v=>v.spotId===s.id).length,td=visits.some(v=>v.spotId===s.id&&dayKey(v.t)===dayKey(Date.now())),near=s.d!=null&&s.d<=RAD;
-   h+=`<div class="card"><div class="row"><div><b>${esc(s.name)}</b><div class="sub" style="margin:0">${s.d==null?'distance unknown':fmt(s.d)+' away'} · radius ${RAD} m</div></div><span class="pill ${n?'ok':''}">${td?'✓ stamped today':n?n+'× stamped':near?'in range':'not yet'}</span></div><div class="row" style="margin-top:8px"><button data-act="checkin" data-id="${s.id}" ${td?'disabled':''}>${td?'Stamped today ✓':'Verify &amp; stamp'}</button></div></div>`}
+   h+=`<div class="card"><div class="row"><div><b>${esc(s.name)}</b><div class="sub" style="margin:0">${s.d==null?'distance unknown':fmt(s.d)+' away'} · radius ${RAD} m</div></div><span class="pill ${n?'ok':''}">${td?'✓ stamped today':n?n+'× stamped':near?'in range':'not yet'}</span></div><div class="row" style="margin-top:8px"><button data-act="checkin" data-id="${s.id}" ${td?'disabled':''}>${td?'Stamped today ✓':'Verify &amp; stamp'}</button><button class="alt" data-act="help" data-id="${s.id}">🔔 Shortcut helper</button></div>${help===s.id?helpHTML(s):''}</div>`}
  }
  if(tab==='map')h+=mapHTML();
  if(tab==='journal'){
@@ -120,6 +122,8 @@ document.addEventListener('click',async e=>{
  if(a==='gps'){msg='Locating…';view();pos=await getPos();msg=''}
  if(a==='addtoggle')adding=!adding;
  if(a==='postoggle')askpos=!askpos;
+ if(a==='help')help=help===t.dataset.id?null:t.dataset.id;
+ if(a==='cp'){await navigator.clipboard.writeText(t.dataset.txt);msg='Copied.'}
  if(a==='redeem'){const v=visits.find(x=>x.id===t.dataset.id);v.redeemed=v.redeemed||{};v.redeemed[t.dataset.m]=!v.redeemed[t.dataset.m];await put('visits',v)}
  if(a==='setpos'){const m=($('#p-ll').value.match(/-?\d+(\.\d+)?/g)||[]).map(Number);
   if(m.length<2||Math.abs(m[0])>90||Math.abs(m[1])>180)msg='Paste coordinates like 35.6586, 139.7454';
